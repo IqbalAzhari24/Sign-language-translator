@@ -1,6 +1,9 @@
-import numpy as np
+from pathlib import Path
 
-from app.landmarks import extract_landmarks, MAX_HANDS, NUM_LANDMARKS
+import numpy as np
+import pytest
+
+from app.landmarks import extract_landmarks, create_hand_landmarker, MAX_HANDS, NUM_LANDMARKS, DEFAULT_MODEL_PATH
 
 
 class FakePoint:
@@ -8,26 +11,27 @@ class FakePoint:
         self.x, self.y, self.z = x, y, z
 
 
-class FakeHand:
-    def __init__(self, seed):
-        self.landmark = [FakePoint(seed, seed, seed) for _ in range(NUM_LANDMARKS)]
-
-
 class FakeResults:
-    def __init__(self, hands):
-        self.multi_hand_landmarks = hands
+    def __init__(self, hand_landmarks):
+        self.hand_landmarks = hand_landmarks
 
 
 class FakeDetector:
-    def __init__(self, hands):
-        self._hands = hands
+    def __init__(self, hand_landmarks):
+        self._hand_landmarks = hand_landmarks
 
-    def process(self, image_rgb):
-        return FakeResults(self._hands)
+    def detect(self, mp_image):
+        return FakeResults(self._hand_landmarks)
+
+
+def _fake_hand(seed):
+    # A "hand" from the Tasks API is directly a list of landmark points
+    # (unlike the legacy API, which wrapped it in a `.landmark` attribute).
+    return [FakePoint(seed, seed, seed) for _ in range(NUM_LANDMARKS)]
 
 
 def test_extract_landmarks_no_hands_returns_zero_padded():
-    detector = FakeDetector(hands=[])
+    detector = FakeDetector(hand_landmarks=[])
     image = np.zeros((10, 10, 3), dtype=np.uint8)
     landmarks, hand_count = extract_landmarks(image, detector)
     assert hand_count == 0
@@ -36,7 +40,7 @@ def test_extract_landmarks_no_hands_returns_zero_padded():
 
 
 def test_extract_landmarks_one_hand_zero_pads_second():
-    detector = FakeDetector(hands=[FakeHand(seed=0.5)])
+    detector = FakeDetector(hand_landmarks=[_fake_hand(seed=0.5)])
     image = np.zeros((10, 10, 3), dtype=np.uint8)
     landmarks, hand_count = extract_landmarks(image, detector)
     assert hand_count == 1
@@ -44,12 +48,13 @@ def test_extract_landmarks_one_hand_zero_pads_second():
     assert np.all(landmarks[1] == 0)
 
 
-def test_extract_landmarks_real_mediapipe_blank_frame_has_no_hands():
-    import mediapipe as mp
+def test_extract_landmarks_real_hand_landmarker_blank_frame_has_no_hands():
+    if not Path(DEFAULT_MODEL_PATH).exists():
+        pytest.skip("hand_landmarker.task not downloaded — see Task 2 Step 0")
 
-    hands = mp.solutions.hands.Hands(static_image_mode=True, max_num_hands=MAX_HANDS)
+    detector = create_hand_landmarker()
     image = np.zeros((480, 640, 3), dtype=np.uint8)
-    landmarks, hand_count = extract_landmarks(image, hands)
-    hands.close()
+    landmarks, hand_count = extract_landmarks(image, detector)
+    detector.close()
     assert hand_count == 0
     assert landmarks.shape == (MAX_HANDS, NUM_LANDMARKS, 3)
