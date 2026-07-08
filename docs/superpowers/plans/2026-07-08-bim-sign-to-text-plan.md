@@ -1459,7 +1459,10 @@ class FakeWebSocket {
   onclose: (() => void) | null = null;
   sent: unknown[] = [];
 
-  constructor(public url: string) {
+  url: string;
+
+  constructor(url: string) {
+    this.url = url;
     FakeWebSocket.instances.push(this);
     setTimeout(() => this.onopen?.(), 0);
   }
@@ -1532,6 +1535,7 @@ export function useSignSocket(url: string) {
   useEffect(() => {
     let cancelled = false;
     let retryDelay = 500;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     function connect() {
       const socket = new WebSocket(url);
@@ -1547,7 +1551,7 @@ export function useSignSocket(url: string) {
       socket.onclose = () => {
         setConnected(false);
         if (!cancelled) {
-          setTimeout(connect, retryDelay);
+          reconnectTimer = setTimeout(connect, retryDelay);
           retryDelay = Math.min(retryDelay * 2, 8000);
         }
       };
@@ -1556,6 +1560,7 @@ export function useSignSocket(url: string) {
     connect();
     return () => {
       cancelled = true;
+      clearTimeout(reconnectTimer);
       socketRef.current?.close();
     };
   }, [url]);
@@ -1569,6 +1574,21 @@ export function useSignSocket(url: string) {
   return { connected, result, sendFrame };
 }
 ```
+
+> **Revision note:** two small fixes found during implementation:
+> 1. **TS config compatibility:** this project's `tsconfig.app.json` sets `erasableSyntaxOnly:
+>    true`, which forbids TypeScript's constructor-parameter-property shorthand (e.g.
+>    `constructor(public url: string)`) since it emits runtime assignment code rather than being
+>    purely erasable types. `tsc -b` failed with `TS1294` on the plan's original `FakeWebSocket`
+>    snippet; esbuild (used by Vitest) didn't catch it, so the test alone wouldn't have caught
+>    this — only the build step would. Fixed by declaring `url: string` as a field and assigning
+>    it in the constructor body instead (shown above).
+> 2. **Reconnect-timer leak on unmount:** the original code scheduled `setTimeout(connect,
+>    retryDelay)` on close with no way to cancel it. If the component unmounted during that
+>    delay window, the timer would still fire and open a brand-new WebSocket after the component
+>    was gone. Track the timer handle and `clearTimeout` it in the effect's cleanup, alongside the
+>    existing `cancelled` flag (which separately prevents scheduling a *new* reconnect after
+>    unmount, but doesn't cancel one already scheduled).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
