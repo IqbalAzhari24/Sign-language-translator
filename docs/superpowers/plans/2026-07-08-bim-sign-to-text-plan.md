@@ -130,17 +130,52 @@ git commit -m "chore: scaffold backend project structure"
 
 ### Task 2: Shared landmark extraction module
 
+> **Revision note:** the plan originally targeted MediaPipe's legacy `mediapipe.solutions.hands`
+> API. That API has been removed from current MediaPipe releases (verified: `mediapipe==0.10.35`
+> ships only the Tasks API — `mp.solutions` no longer includes `hands`). This task now targets
+> the current **MediaPipe Tasks API** (`mediapipe.tasks.python.vision.HandLandmarker`) instead.
+> This changes the detector interface from `.process(image_rgb) -> .multi_hand_landmarks` (each
+> hand wrapped in a `.landmark` list) to `.detect(mp_image) -> .hand_landmarks` (each hand is
+> directly a list of landmark points). Tasks 5, 6, 7, 8 below have been updated to match.
+
 **Files:**
 - Create: `backend/app/landmarks.py`
+- Create: `backend/models/.gitkeep` (directory placeholder; the actual model file is downloaded,
+  not committed — see Step 0)
 - Test: `backend/tests/test_landmarks.py`
+- Modify: `.gitignore` (ignore the downloaded model binary)
+
+- [ ] **Step 0: Add model directory to .gitignore and download the hand landmarker model**
+
+Add this line to the root `.gitignore`:
+```
+backend/models/*.task
+```
+
+The Tasks API requires a model bundle file (not bundled with the `mediapipe` pip package). Create
+the directory and download it:
+
+Run:
+```bash
+mkdir -p backend/models
+curl -L -o backend/models/hand_landmarker.task https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+```
+Expected: `backend/models/hand_landmarker.task` exists and is a few MB (a "data" file, not text —
+this is a binary model bundle, that's correct).
+
+Create `backend/models/.gitkeep` (empty file) so the directory itself is tracked even though the
+`.task` file inside it is gitignored.
 
 - [ ] **Step 1: Write the failing tests**
 
 `backend/tests/test_landmarks.py`:
 ```python
-import numpy as np
+from pathlib import Path
 
-from app.landmarks import extract_landmarks, MAX_HANDS, NUM_LANDMARKS
+import numpy as np
+import pytest
+
+from app.landmarks import extract_landmarks, create_hand_landmarker, MAX_HANDS, NUM_LANDMARKS, DEFAULT_MODEL_PATH
 
 
 class FakePoint:
@@ -148,26 +183,27 @@ class FakePoint:
         self.x, self.y, self.z = x, y, z
 
 
-class FakeHand:
-    def __init__(self, seed):
-        self.landmark = [FakePoint(seed, seed, seed) for _ in range(NUM_LANDMARKS)]
-
-
 class FakeResults:
-    def __init__(self, hands):
-        self.multi_hand_landmarks = hands
+    def __init__(self, hand_landmarks):
+        self.hand_landmarks = hand_landmarks
 
 
 class FakeDetector:
-    def __init__(self, hands):
-        self._hands = hands
+    def __init__(self, hand_landmarks):
+        self._hand_landmarks = hand_landmarks
 
-    def process(self, image_rgb):
-        return FakeResults(self._hands)
+    def detect(self, mp_image):
+        return FakeResults(self._hand_landmarks)
+
+
+def _fake_hand(seed):
+    # A "hand" from the Tasks API is directly a list of landmark points
+    # (unlike the legacy API, which wrapped it in a `.landmark` attribute).
+    return [FakePoint(seed, seed, seed) for _ in range(NUM_LANDMARKS)]
 
 
 def test_extract_landmarks_no_hands_returns_zero_padded():
-    detector = FakeDetector(hands=[])
+    detector = FakeDetector(hand_landmarks=[])
     image = np.zeros((10, 10, 3), dtype=np.uint8)
     landmarks, hand_count = extract_landmarks(image, detector)
     assert hand_count == 0
@@ -176,7 +212,7 @@ def test_extract_landmarks_no_hands_returns_zero_padded():
 
 
 def test_extract_landmarks_one_hand_zero_pads_second():
-    detector = FakeDetector(hands=[FakeHand(seed=0.5)])
+    detector = FakeDetector(hand_landmarks=[_fake_hand(seed=0.5)])
     image = np.zeros((10, 10, 3), dtype=np.uint8)
     landmarks, hand_count = extract_landmarks(image, detector)
     assert hand_count == 1
@@ -184,13 +220,14 @@ def test_extract_landmarks_one_hand_zero_pads_second():
     assert np.all(landmarks[1] == 0)
 
 
-def test_extract_landmarks_real_mediapipe_blank_frame_has_no_hands():
-    import mediapipe as mp
+def test_extract_landmarks_real_hand_landmarker_blank_frame_has_no_hands():
+    if not Path(DEFAULT_MODEL_PATH).exists():
+        pytest.skip("hand_landmarker.task not downloaded — see Task 2 Step 0")
 
-    hands = mp.solutions.hands.Hands(static_image_mode=True, max_num_hands=MAX_HANDS)
+    detector = create_hand_landmarker()
     image = np.zeros((480, 640, 3), dtype=np.uint8)
-    landmarks, hand_count = extract_landmarks(image, hands)
-    hands.close()
+    landmarks, hand_count = extract_landmarks(image, detector)
+    detector.close()
     assert hand_count == 0
     assert landmarks.shape == (MAX_HANDS, NUM_LANDMARKS, 3)
 ```
@@ -204,32 +241,62 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.landmarks'`
 
 `backend/app/landmarks.py`:
 ```python
+from pathlib import Path
+
+import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision
 
 MAX_HANDS = 2
 NUM_LANDMARKS = 21
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "hand_landmarker.task"
+
+
+def create_hand_landmarker(model_path=DEFAULT_MODEL_PATH, num_hands=MAX_HANDS):
+    """Build a MediaPipe HandLandmarker (Tasks API) in synchronous IMAGE mode.
+
+    IMAGE mode (stateless, one call per frame) is used both here and by the
+    training pipeline so train-time and inference-time landmark extraction
+    never diverge.
+    """
+    model_path = Path(model_path)
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Hand landmarker model not found at {model_path}. Download it first:\n"
+            f"curl -L -o {model_path} "
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
+        )
+    options = vision.HandLandmarkerOptions(
+        base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
+        num_hands=num_hands,
+        running_mode=vision.RunningMode.IMAGE,
+    )
+    return vision.HandLandmarker.create_from_options(options)
 
 
 def extract_landmarks(image_bgr, hands_detector):
-    """Run a MediaPipe-Hands-compatible detector over one BGR frame.
+    """Run a HandLandmarker-compatible detector over one BGR frame.
 
     Returns (landmarks, hand_count) where landmarks is a
     (MAX_HANDS, NUM_LANDMARKS, 3) float32 array, zero-padded when
-    fewer than MAX_HANDS are detected. `hands_detector` must expose
-    a `.process(image_rgb)` method returning an object with a
-    `.multi_hand_landmarks` attribute (real MediaPipe Hands, or a
-    test fake with the same shape).
+    fewer than MAX_HANDS are detected. `hands_detector` must expose a
+    `.detect(mp_image)` method returning an object with a
+    `.hand_landmarks` attribute: a list of hands, each hand a list of
+    landmark-like objects with .x/.y/.z (matches MediaPipe Tasks'
+    HandLandmarker, or a test fake with the same shape).
     """
-    image_rgb = image_bgr[:, :, ::-1]
-    results = hands_detector.process(image_rgb)
+    image_rgb = np.ascontiguousarray(image_bgr[:, :, ::-1])
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
+    results = hands_detector.detect(mp_image)
+
     landmarks = np.zeros((MAX_HANDS, NUM_LANDMARKS, 3), dtype=np.float32)
     hand_count = 0
 
-    if results.multi_hand_landmarks:
-        for i, hand in enumerate(results.multi_hand_landmarks[:MAX_HANDS]):
-            for j, point in enumerate(hand.landmark):
-                landmarks[i, j] = (point.x, point.y, point.z)
-            hand_count += 1
+    for i, hand in enumerate(results.hand_landmarks[:MAX_HANDS]):
+        for j, point in enumerate(hand):
+            landmarks[i, j] = (point.x, point.y, point.z)
+        hand_count += 1
 
     return landmarks, hand_count
 ```
@@ -237,13 +304,13 @@ def extract_landmarks(image_bgr, hands_detector):
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && pytest tests/test_landmarks.py -v`
-Expected: 3 passed
+Expected: 3 passed (the real-detector test runs, not skipped, since Step 0 downloaded the model)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/landmarks.py backend/tests/test_landmarks.py
-git commit -m "feat: add shared MediaPipe landmark extraction module"
+git add backend/app/landmarks.py backend/tests/test_landmarks.py backend/models/.gitkeep .gitignore
+git commit -m "feat: add shared MediaPipe Tasks-API landmark extraction module"
 ```
 
 ---
@@ -455,11 +522,11 @@ from train.dataset import SignDataset
 
 
 class FakeResults:
-    multi_hand_landmarks = None
+    hand_landmarks = []
 
 
 class FakeDetector:
-    def process(self, image_rgb):
+    def detect(self, mp_image):
         return FakeResults()
 
 
@@ -586,26 +653,23 @@ class FakePoint:
         self.x = self.y = self.z = v
 
 
-class FakeHand:
-    def __init__(self, v):
-        self.landmark = [FakePoint(v) for _ in range(21)]
-
-
 class FakeResults:
-    def __init__(self, hands):
-        self.multi_hand_landmarks = hands
+    def __init__(self, hand_landmarks):
+        self.hand_landmarks = hand_landmarks
 
 
 class MeanIntensityDetector:
     """Fake detector: landmark value = mean pixel intensity of the frame.
 
     Makes the two synthetic classes (different fill values) actually
-    separable, so the training loss test is meaningful.
+    separable, so the training loss test is meaningful. Mimics the
+    Tasks API shape: each hand is directly a list of landmark points.
     """
 
-    def process(self, image_rgb):
-        value = float(image_rgb.mean()) / 255.0
-        return FakeResults([FakeHand(value)])
+    def detect(self, mp_image):
+        value = float(np.asarray(mp_image.numpy_view()).mean()) / 255.0
+        hand = [FakePoint(value) for _ in range(21)]
+        return FakeResults([hand])
 
 
 def _write_frames(dir_path, count, value):
@@ -697,7 +761,7 @@ def train(
 
 
 if __name__ == "__main__":
-    import mediapipe as mp
+    from app.landmarks import create_hand_landmarker
 
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset_root", help="Path laid out as <root>/<class>/<sample>/*.jpg")
@@ -707,16 +771,16 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
 
-    hands = mp.solutions.hands.Hands(static_image_mode=True, max_num_hands=2)
+    detector = create_hand_landmarker()
     train(
         args.dataset_root,
-        hands,
+        detector,
         args.checkpoint_path,
         epochs=args.epochs,
         sequence_length=args.sequence_length,
         batch_size=args.batch_size,
     )
-    hands.close()
+    detector.close()
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -752,23 +816,22 @@ from app.landmarks import NUM_LANDMARKS
 
 
 class ZeroHandDetector:
-    def process(self, image_rgb):
+    def detect(self, mp_image):
         class R:
-            multi_hand_landmarks = None
+            hand_landmarks = []
         return R()
 
 
 class OneHandDetector:
-    def process(self, image_rgb):
+    def detect(self, mp_image):
         class Point:
             def __init__(self):
                 self.x = self.y = self.z = 0.1
 
-        class Hand:
-            landmark = [Point() for _ in range(NUM_LANDMARKS)]
+        hand = [Point() for _ in range(NUM_LANDMARKS)]
 
         class R:
-            multi_hand_landmarks = [Hand()]
+            hand_landmarks = [hand]
         return R()
 
 
@@ -1028,7 +1091,7 @@ def load_model(checkpoint_path: Path):
 
 
 def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
-    import mediapipe as mp
+    from .landmarks import create_hand_landmarker
 
     model, class_names = load_model(checkpoint_path)
     app = FastAPI()
@@ -1036,8 +1099,8 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
     @app.websocket("/ws/sign-stream")
     async def sign_stream(websocket: WebSocket):
         await websocket.accept()
-        hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2)
-        session = SessionInference(model=model, hands_detector=hands, class_names=class_names)
+        detector = create_hand_landmarker()
+        session = SessionInference(model=model, hands_detector=detector, class_names=class_names)
         try:
             while True:
                 data = await websocket.receive_bytes()
@@ -1047,7 +1110,7 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            hands.close()
+            detector.close()
 
     return app
 
