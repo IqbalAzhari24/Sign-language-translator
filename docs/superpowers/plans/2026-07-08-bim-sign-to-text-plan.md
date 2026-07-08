@@ -1621,26 +1621,61 @@ import { useSpeech } from "./useSpeech";
 beforeEach(() => {
   // @ts-expect-error test override
   window.speechSynthesis = { speak: vi.fn() };
+  // A vi.fn() wrapping an arrow function has no [[Construct]], so `new
+  // SpeechSynthesisUtterance(...)` in the hook would throw "is not a
+  // constructor" — use a plain function expression instead.
   // @ts-expect-error test override
-  global.SpeechSynthesisUtterance = vi.fn().mockImplementation((text: string) => ({ text }));
+  global.SpeechSynthesisUtterance = vi.fn().mockImplementation(function (text: string) {
+    return { text };
+  });
 });
 
 describe("useSpeech", () => {
   it("speaks once per newly recognized label", () => {
-    const { rerender } = renderHook(({ result }) => useSpeech(result), {
-      initialProps: { result: { status: "recognized", label: "A", confidence: 0.9 } as const },
-    });
+    const { rerender } = renderHook(
+      ({ result }: { result: SignResult }) => useSpeech(result),
+      { initialProps: { result: { status: "recognized", label: "A", confidence: 0.9 } } }
+    );
 
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
 
-    rerender({ result: { status: "recognized", label: "A", confidence: 0.95 } as const });
+    rerender({ result: { status: "recognized", label: "A", confidence: 0.95 } });
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
 
-    rerender({ result: { status: "recognized", label: "B", confidence: 0.9 } as const });
+    rerender({ result: { status: "recognized", label: "B", confidence: 0.9 } });
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-announces the same label after the hand is lost and shown again", () => {
+    const { rerender } = renderHook(
+      ({ result }: { result: SignResult }) => useSpeech(result),
+      { initialProps: { result: { status: "recognized", label: "A", confidence: 0.9 } } }
+    );
+
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
+
+    rerender({ result: { status: "no_hand" } });
+    rerender({ result: { status: "recognized", label: "A", confidence: 0.9 } });
+
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
   });
 });
 ```
+
+> **Revision note:** two issues found during implementation:
+> 1. **Mock/type adaptations** (test-only, no hook behavior change): a `vi.fn()`-wrapped arrow
+>    function has no `[[Construct]]`, so it can't back a `new SpeechSynthesisUtterance(...)` call
+>    — switched to a plain `function` expression. Also dropped `as const` on the `SignResult`
+>    object literals (it over-narrowed `confidence`/`label` to single-value literal types, which
+>    then failed `tsc -b` on `rerender` with a different literal) in favor of annotating the
+>    render callback's parameter as `{ result: SignResult }` for correct contextual typing.
+> 2. **Real bug: repeated signs after a gap were never re-announced.** The original hook only
+>    ever compares the new label against `lastSpokenRef`, which is set once and never cleared.
+>    So performing sign "A", then "B", then "A" again would speak "A" only the first time — the
+>    second "A" performance is silently skipped, since the ref still holds `"A"` from earlier.
+>    For a live translator this is a real functional bug (each performed sign should be
+>    announced, not just each *distinct* label ever seen). Fixed by clearing `lastSpokenRef`
+>    whenever `status` is anything other than `"recognized"` — see the revised hook below.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1658,7 +1693,13 @@ export function useSpeech(result: SignResult) {
   const lastSpokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (result.status !== "recognized") return;
+    if (result.status !== "recognized") {
+      // Any non-recognized status (hand lost, still tracking, unsure)
+      // re-arms the guard so the next recognized sign — even a repeat
+      // of the same label — gets announced again.
+      lastSpokenRef.current = null;
+      return;
+    }
     if (result.label === lastSpokenRef.current) return;
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
@@ -1672,7 +1713,7 @@ export function useSpeech(result: SignResult) {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd frontend && npm run test -- useSpeech`
-Expected: 1 passed
+Expected: 2 passed
 
 - [ ] **Step 5: Commit**
 
