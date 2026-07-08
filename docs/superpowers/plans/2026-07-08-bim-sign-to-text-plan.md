@@ -1054,6 +1054,14 @@ def test_load_model_missing_checkpoint_raises(tmp_path):
 
 
 def test_websocket_blank_frame_returns_no_hand(tmp_path):
+    from pathlib import Path
+
+    import pytest
+    from app.landmarks import DEFAULT_MODEL_PATH
+
+    if not Path(DEFAULT_MODEL_PATH).exists():
+        pytest.skip("hand_landmarker.task not downloaded — see Task 2 Step 0")
+
     checkpoint_path = tmp_path / "model.pt"
     _save_dummy_checkpoint(checkpoint_path)
     app = create_app(checkpoint_path=checkpoint_path)
@@ -1065,6 +1073,32 @@ def test_websocket_blank_frame_returns_no_hand(tmp_path):
 
     with client.websocket_connect("/ws/sign-stream") as ws:
         ws.send_bytes(encoded.tobytes())
+        response = ws.receive_json()
+
+    assert response["status"] == "no_hand"
+
+
+def test_websocket_malformed_frame_is_skipped_not_fatal(tmp_path):
+    from pathlib import Path
+
+    import pytest
+    from app.landmarks import DEFAULT_MODEL_PATH
+
+    if not Path(DEFAULT_MODEL_PATH).exists():
+        pytest.skip("hand_landmarker.task not downloaded — see Task 2 Step 0")
+
+    checkpoint_path = tmp_path / "model.pt"
+    _save_dummy_checkpoint(checkpoint_path)
+    app = create_app(checkpoint_path=checkpoint_path)
+    client = TestClient(app)
+
+    blank = np.zeros((480, 640, 3), dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", blank)
+    assert ok
+
+    with client.websocket_connect("/ws/sign-stream") as ws:
+        ws.send_bytes(b"not a real jpeg")  # cv2.imdecode returns None for this
+        ws.send_bytes(encoded.tobytes())  # connection must still be alive after
         response = ws.receive_json()
 
     assert response["status"] == "no_hand"
@@ -1120,7 +1154,17 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
             while True:
                 data = await websocket.receive_bytes()
                 frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-                result = session.process_frame(frame)
+                if frame is None:
+                    # Malformed/truncated frame (e.g. a dropped or partial
+                    # packet) — skip it rather than letting a decode failure
+                    # kill the whole connection. One bad frame over an
+                    # inherently lossy live-video transport shouldn't end
+                    # the session.
+                    continue
+                try:
+                    result = session.process_frame(frame)
+                except Exception:
+                    continue
                 await websocket.send_json(result.to_dict())
         except WebSocketDisconnect:
             pass
@@ -1129,6 +1173,15 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
 
     return app
 ```
+
+> **Revision note (robustness):** code review on the initial implementation found that a
+> malformed frame (e.g. `cv2.imdecode` returning `None` for corrupt/truncated bytes) would raise
+> an uncaught `TypeError` inside `extract_landmarks`, terminating the entire WebSocket connection
+> for what should be a recoverable, momentary glitch — realistic on a live video stream over an
+> unreliable transport. The fix above skips a frame that fails to decode (`frame is None`) and
+> also catches any exception from `session.process_frame` itself, continuing the loop either way
+> instead of crashing the connection. `detector.close()` in `finally` still runs on genuine
+> disconnects exactly as before.
 
 > **Revision note:** the plan originally had a module-level `app = create_app()` line, intended
 > to give `uvicorn app.main:app` a ready-made ASGI app to serve, matching the "fail fast if
@@ -1147,7 +1200,7 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && pytest tests/test_main.py -v`
-Expected: 2 passed
+Expected: 3 passed
 
 Note: with the module-level `app = create_app()` line removed, `import app.main` (and thus
 `from app.main import create_app, load_model` in tests) has no side effects and always succeeds.
