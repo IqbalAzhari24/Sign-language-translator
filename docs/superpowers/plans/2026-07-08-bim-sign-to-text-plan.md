@@ -1113,6 +1113,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.main'`
 
 `backend/app/main.py`:
 ```python
+import logging
 from pathlib import Path
 
 import cv2
@@ -1122,6 +1123,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .inference import SessionInference
 from .model import SignSequenceClassifier
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "checkpoints" / "model.pt"
 
@@ -1164,6 +1167,7 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
                 try:
                     result = session.process_frame(frame)
                 except Exception:
+                    logger.exception("Error processing frame, skipping")
                     continue
                 await websocket.send_json(result.to_dict())
         except WebSocketDisconnect:
@@ -1182,6 +1186,13 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
 > also catches any exception from `session.process_frame` itself, continuing the loop either way
 > instead of crashing the connection. `detector.close()` in `finally` still runs on genuine
 > disconnects exactly as before.
+>
+> **Follow-up revision:** a later code-quality review pointed out that catching `Exception`
+> silently (no log line, no client-facing signal) makes a genuine bug in the inference pipeline
+> just as invisible as a malformed frame — a real regression would degrade to "responses quietly
+> stop" instead of a loud, debuggable failure. Added `logging.getLogger(__name__)` and a
+> `logger.exception(...)` call in the except block so a real error is still recorded, while the
+> connection itself stays alive either way.
 
 > **Revision note:** the plan originally had a module-level `app = create_app()` line, intended
 > to give `uvicorn app.main:app` a ready-made ASGI app to serve, matching the "fail fast if
