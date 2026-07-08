@@ -39,7 +39,17 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
             while True:
                 data = await websocket.receive_bytes()
                 frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-                result = session.process_frame(frame)
+                if frame is None:
+                    # Malformed/truncated frame (e.g. a dropped or partial
+                    # packet) — skip it rather than letting a decode failure
+                    # kill the whole connection. One bad frame over an
+                    # inherently lossy live-video transport shouldn't end
+                    # the session.
+                    continue
+                try:
+                    result = session.process_frame(frame)
+                except Exception:
+                    continue
                 await websocket.send_json(result.to_dict())
         except WebSocketDisconnect:
             pass
