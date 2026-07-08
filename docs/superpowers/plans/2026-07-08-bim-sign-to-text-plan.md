@@ -1128,20 +1128,33 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
             detector.close()
 
     return app
-
-
-app = create_app()
 ```
+
+> **Revision note:** the plan originally had a module-level `app = create_app()` line, intended
+> to give `uvicorn app.main:app` a ready-made ASGI app to serve, matching the "fail fast if
+> checkpoint missing" requirement. In practice this breaks `test_main.py`: `from app.main import
+> create_app, load_model` executes the whole module, including that module-level line, which
+> calls `load_model(CHECKPOINT_PATH)` and raises `FileNotFoundError` **at import time** — before
+> either test function runs — since no checkpoint exists in a fresh checkout. pytest then reports
+> a collection error, not "2 passed". The fix: drop the module-level `app = create_app()` line
+> entirely and run the server via uvicorn's **factory pattern** instead (`uvicorn
+> app.main:create_app --factory`), which calls `create_app()` lazily at server startup, not at
+> import time. Fail-fast behavior is preserved (the server still refuses to start without a
+> checkpoint) — it just fails at server-start time instead of module-import time, which is
+> actually more correct: importing the module for testing/tooling purposes should never have a
+> side effect that depends on unrelated runtime state.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && pytest tests/test_main.py -v`
 Expected: 2 passed
 
-Note: `app = create_app()` at module level means importing `app.main` (e.g. running
-`uvicorn app.main:app`) requires a real checkpoint at `backend/checkpoints/model.pt` — that's the
-fail-fast behavior the spec calls for. Tests use `create_app(checkpoint_path=...)` directly so
-they don't depend on that default path.
+Note: with the module-level `app = create_app()` line removed, `import app.main` (and thus
+`from app.main import create_app, load_model` in tests) has no side effects and always succeeds.
+Running the real server later (Task 14) uses `uvicorn app.main:create_app --factory`, which calls
+`create_app()` — and therefore `load_model(CHECKPOINT_PATH)` — only when the server actually
+starts, still failing fast if `backend/checkpoints/model.pt` is missing at that point. Tests use
+`create_app(checkpoint_path=...)` directly so they don't depend on the default path either way.
 
 - [ ] **Step 5: Commit**
 
@@ -1743,7 +1756,7 @@ Expected: script completes, `backend/checkpoints/model.pt` exists.
 
 - [ ] **Step 3: Start backend server**
 
-Run: `cd backend && uvicorn app.main:app --reload --port 8000`
+Run: `cd backend && uvicorn app.main:create_app --factory --reload --port 8000`
 Expected: server starts without error (fails fast if checkpoint from Step 2 is missing).
 
 - [ ] **Step 4: Start frontend dev server**
