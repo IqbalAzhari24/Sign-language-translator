@@ -599,15 +599,21 @@ class SignDataset(Dataset):
 
     def __getitem__(self, idx):
         sample_dir, label = self.samples[idx]
-        frame_paths = sorted(sample_dir.glob("*.jpg"))
+        frame_paths = sorted(sample_dir.glob("*.jpg"))[: self.sequence_length]
 
+        # Left-pad (real frames placed at the end) so a sample with fewer
+        # frames than sequence_length still ends on a real frame — the
+        # model reads only the final GRU timestep (app/model.py), and must
+        # see the same left-padding convention at train time as at
+        # inference time (app/inference.py's _prepare_sequence).
         sequence = np.zeros(
             (self.sequence_length, MAX_HANDS, NUM_LANDMARKS, 3), dtype=np.float32
         )
-        for i, frame_path in enumerate(frame_paths[: self.sequence_length]):
+        offset = self.sequence_length - len(frame_paths)
+        for i, frame_path in enumerate(frame_paths):
             frame = cv2.imread(str(frame_path))
             landmarks, _ = extract_landmarks(frame, self.hands_detector)
-            sequence[i] = landmarks
+            sequence[offset + i] = landmarks
 
         flat = sequence.reshape(self.sequence_length, -1)
         return torch.from_numpy(flat), label
@@ -984,8 +990,13 @@ class SessionInference:
     def _prepare_sequence(self, sequence: List[np.ndarray]) -> torch.Tensor:
         flat = [frame.reshape(-1) for frame in sequence]
         if len(flat) < self.sequence_length:
+            # Left-pad (pad at the start) so the sequence always *ends* on a
+            # real frame. The model reads only the final GRU timestep
+            # (see app/model.py) — right-padding would leave that final
+            # timestep dominated by trailing zero-padding instead of the
+            # actual sign.
             pad = [np.zeros_like(flat[0])] * (self.sequence_length - len(flat))
-            flat = flat + pad
+            flat = pad + flat
         else:
             flat = flat[-self.sequence_length :]
         return torch.tensor(np.stack(flat), dtype=torch.float32)
