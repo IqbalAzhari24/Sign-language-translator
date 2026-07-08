@@ -599,7 +599,11 @@ class SignDataset(Dataset):
 
     def __getitem__(self, idx):
         sample_dir, label = self.samples[idx]
-        frame_paths = sorted(sample_dir.glob("*.jpg"))[: self.sequence_length]
+        # Take the LAST sequence_length frames (not the first) so an
+        # over-long recorded sample uses the same "most recent frames"
+        # convention as live inference's _prepare_sequence, which also
+        # keeps the tail when a boundary-detected buffer runs long.
+        frame_paths = sorted(sample_dir.glob("*.jpg"))[-self.sequence_length :]
 
         # Left-pad (real frames placed at the end) so a sample with fewer
         # frames than sequence_length still ends on a real frame — the
