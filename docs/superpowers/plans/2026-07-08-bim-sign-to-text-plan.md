@@ -1383,10 +1383,18 @@ export function useWebcam() {
 
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
 
     navigator.mediaDevices
       .getUserMedia({ video: true })
       .then((s) => {
+        if (cancelled) {
+          // Unmounted before getUserMedia resolved — stop the granted
+          // stream immediately instead of leaking it (camera indicator
+          // would otherwise stay lit until the page fully closes).
+          s.getTracks().forEach((track) => track.stop());
+          return;
+        }
         stream = s;
         if (videoRef.current) {
           videoRef.current.srcObject = s;
@@ -1396,6 +1404,7 @@ export function useWebcam() {
       .catch((err: Error) => setError(err.message));
 
     return () => {
+      cancelled = true;
       stream?.getTracks().forEach((track) => track.stop());
     };
   }, []);
@@ -1403,6 +1412,15 @@ export function useWebcam() {
   return { videoRef, ready, error };
 }
 ```
+
+> **Revision note (robustness):** code review caught a real leak in the original version — if the
+> component unmounts before `getUserMedia` resolves, the effect's cleanup runs while the local
+> `stream` variable is still `null`, so it stops nothing; when the promise later resolves, the
+> granted `MediaStream` is assigned to `stream` but no cleanup ever runs again to stop it. Net
+> effect: the browser's camera indicator stays lit and the track keeps running until the whole
+> page closes. Added a `cancelled` flag set by the cleanup function; if `getUserMedia` resolves
+> after cancellation, the newly granted stream's tracks are stopped immediately instead of being
+> attached or left running.
 
 - [ ] **Step 4: Run test to verify it passes**
 
