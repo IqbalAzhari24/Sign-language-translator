@@ -40,4 +40,21 @@ describe("useSpeech", () => {
 
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["no_hand", "tracking", "unsure"] as const)(
+    "re-announces the same label after a %s gap",
+    (gapStatus) => {
+      const { rerender } = renderHook(
+        ({ result }: { result: SignResult }) => useSpeech(result),
+        { initialProps: { result: { status: "recognized", label: "A", confidence: 0.9 } } }
+      );
+
+      expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
+
+      rerender({ result: { status: gapStatus } });
+      rerender({ result: { status: "recognized", label: "A", confidence: 0.9 } });
+
+      expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
+    }
+  );
 });
