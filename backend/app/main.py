@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import cv2
@@ -7,6 +8,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .inference import SessionInference
 from .model import SignSequenceClassifier
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "checkpoints" / "model.pt"
 
@@ -49,6 +52,7 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
                 try:
                     result = session.process_frame(frame)
                 except Exception:
+                    logger.exception("Error processing frame, skipping")
                     continue
                 await websocket.send_json(result.to_dict())
         except WebSocketDisconnect:
