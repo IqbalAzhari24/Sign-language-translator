@@ -26,4 +26,18 @@ describe("useSpeech", () => {
     rerender({ result: { status: "recognized", label: "B", confidence: 0.9 } });
     expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
   });
+
+  it("re-announces the same label after the hand is lost and shown again", () => {
+    const { rerender } = renderHook(
+      ({ result }: { result: SignResult }) => useSpeech(result),
+      { initialProps: { result: { status: "recognized", label: "A", confidence: 0.9 } } }
+    );
+
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(1);
+
+    rerender({ result: { status: "no_hand" } });
+    rerender({ result: { status: "recognized", label: "A", confidence: 0.9 } });
+
+    expect(window.speechSynthesis.speak).toHaveBeenCalledTimes(2);
+  });
 });
