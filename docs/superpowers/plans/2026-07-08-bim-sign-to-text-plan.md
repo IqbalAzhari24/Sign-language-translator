@@ -1233,7 +1233,7 @@ git commit -m "feat: add FastAPI WebSocket sign-stream server"
 
 **Files:**
 - Create: `frontend/` (Vite scaffold)
-- Modify: `frontend/tailwind.config.js`, `frontend/postcss.config.js`, `frontend/vite.config.ts`, `frontend/src/index.css`, `frontend/package.json`
+- Modify: `frontend/vite.config.ts`, `frontend/src/index.css`, `frontend/package.json`
 - Create: `frontend/src/setupTests.ts`
 
 - [ ] **Step 1: Scaffold the Vite React-TS app**
@@ -1243,54 +1243,46 @@ Expected: `frontend/` created with a working React+TS app.
 
 - [ ] **Step 2: Install Tailwind and test dependencies**
 
-Run: `cd frontend && npm install && npm install -D tailwindcss postcss autoprefixer vitest @testing-library/react @testing-library/jest-dom jsdom`
+Run: `cd frontend && npm install && npm install -D tailwindcss @tailwindcss/vite vitest @testing-library/react @testing-library/jest-dom jsdom`
 
-- [ ] **Step 3: Configure Tailwind**
+> **Revision note (version drift):** this plan was written against Tailwind v3 (config-file +
+> PostCSS based). By implementation time, current installs pull **Tailwind v4**, which dropped
+> `tailwind.config.js`/`postcss.config.js`/`autoprefixer` in favor of a single `@tailwindcss/vite`
+> Vite plugin and one `@import "tailwindcss";` line in CSS. Steps 3-4 below reflect the actual v4
+> setup used — no `postcss`/`autoprefixer` package, no config JS files. If a future contributor
+> installs on an environment that resolves Tailwind v3 instead, fall back to the classic
+> `tailwind.config.js` + `postcss.config.js` + `@tailwind base/components/utilities` approach; the
+> outcome that matters is "Tailwind classes work in components and the build succeeds," not the
+> literal file mechanism.
 
-`frontend/tailwind.config.js`:
-```javascript
-/** @type {import('tailwindcss').Config} */
-export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: { extend: {} },
-  plugins: [],
-};
-```
+- [ ] **Step 3: Configure Tailwind (v4 — Vite plugin, no config files)**
 
-`frontend/postcss.config.js`:
-```javascript
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-};
-```
-
-`frontend/src/index.css` (replace entire contents):
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-```
-
-- [ ] **Step 4: Configure Vitest**
-
-`frontend/vite.config.ts`:
+`frontend/vite.config.ts` — add the Tailwind Vite plugin alongside `@vitejs/plugin-react`:
 ```typescript
-/// <reference types="vitest" />
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   test: {
     environment: "jsdom",
     setupFiles: "./src/setupTests.ts",
     globals: true,
+    passWithNoTests: true,
   },
 });
 ```
+
+`frontend/src/index.css` (replace entire contents):
+```css
+@import "tailwindcss";
+```
+
+(No `tailwind.config.js` or `postcss.config.js` needed — v4 scans content automatically.)
+
+- [ ] **Step 4: Configure Vitest**
 
 `frontend/src/setupTests.ts`:
 ```typescript
@@ -1301,6 +1293,10 @@ Add to `frontend/package.json` `"scripts"`:
 ```json
 "test": "vitest run"
 ```
+
+Note: `passWithNoTests: true` in the Vitest config above is required for Step 5 below —
+Vitest 4 exits with a non-zero code by default when zero test files exist, which would otherwise
+fail this task's own acceptance check before any tests exist yet (Tasks 10-13 add the first ones).
 
 - [ ] **Step 5: Verify the test runner works with zero tests**
 
