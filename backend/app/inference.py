@@ -45,7 +45,7 @@ class SessionInference:
         if hand_count == 0:
             return InferenceResult(status="no_hand")
 
-        sequence = self.boundary_detector.update(landmarks)
+        sequence = self.boundary_detector.update(landmarks, hand_count)
         if sequence is None:
             return InferenceResult(status="tracking")
 

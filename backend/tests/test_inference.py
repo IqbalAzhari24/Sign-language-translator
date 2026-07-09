@@ -28,12 +28,12 @@ class OneHandDetector:
 
 class AlwaysReadyBoundary:
     """Fake boundary detector: every frame immediately completes a 1-frame sequence."""
-    def update(self, landmarks):
+    def update(self, landmarks, hand_count=None):
         return [landmarks]
 
 
 class NeverReadyBoundary:
-    def update(self, landmarks):
+    def update(self, landmarks, hand_count=None):
         return None
 
 
