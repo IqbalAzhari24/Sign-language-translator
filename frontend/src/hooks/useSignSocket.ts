@@ -27,6 +27,7 @@ export function useSignSocket(url: string) {
       };
       socket.onclose = () => {
         setConnected(false);
+        setResult({ status: "no_hand" });
         if (!cancelled) {
           retryTimer = setTimeout(connect, retryDelay);
           retryDelay = Math.min(retryDelay * 2, 8000);
