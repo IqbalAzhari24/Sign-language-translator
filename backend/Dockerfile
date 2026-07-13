@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# mediapipe needs system OpenGL libs just to import, even for CPU-only inference
+# mediapipe needs system OpenGL libs just to import, even for CPU-only
+# inference, and opencv-python-headless still links against glib
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgles2 libegl1 libgl1 \
+    libgles2 libegl1 libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
