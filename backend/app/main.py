@@ -36,7 +36,13 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
     @app.websocket("/ws/sign-stream")
     async def sign_stream(websocket: WebSocket):
         await websocket.accept()
-        detector = create_hand_landmarker()
+        try:
+            detector = create_hand_landmarker()
+        except FileNotFoundError:
+            logger.exception("Failed to create hand landmarker")
+            await websocket.close(code=1011, reason="Server not ready: missing hand landmarker model")
+            return
+
         session = SessionInference(model=model, hands_detector=detector, class_names=class_names)
         try:
             while True:

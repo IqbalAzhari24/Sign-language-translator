@@ -1,0 +1,33 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install system dependencies for mediapipe
+        run: sudo apt-get update && sudo apt-get install -y libgles2 libegl1 libgl1
+      - name: Install Python dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run backend tests
+        run: cd backend && pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+      - name: Run frontend tests
+        run: cd frontend && npm test

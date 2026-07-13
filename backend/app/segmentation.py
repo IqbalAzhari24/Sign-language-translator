@@ -48,20 +48,19 @@ class SignBoundaryDetector:
         self.reference = None
         self.reference_hands = 0
 
-    def update(self, landmarks: np.ndarray, hand_count: int = None):
+    def update(self, landmarks: np.ndarray, hand_count: int):
         """Feed one frame's landmarks.
 
         `hand_count` is the number of real (non-zero-padded) hand slots
-        in `landmarks`. Pass it when available so a hand appearing or
-        disappearing between frames isn't scored as motion. Defaults to
-        all slots if omitted.
+        in `landmarks` — required, since a zero-padded slot (no hand
+        present) is indistinguishable from a real hand parked at the
+        origin, so it can't be inferred from `landmarks` alone. Pass it
+        so a hand appearing or disappearing between frames isn't scored
+        as motion.
 
         Returns the buffered frame sequence when a sign boundary is
         detected, else None.
         """
-        if hand_count is None:
-            hand_count = landmarks.shape[0]
-
         self.buffer.append(landmarks)
         self.hand_counts.append(hand_count)
 
