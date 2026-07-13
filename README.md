@@ -70,6 +70,20 @@ npm run dev
 
 Set `VITE_WS_URL` if the backend isn't at `ws://localhost:8000/ws/sign-stream`.
 
+## Deployment
+
+- **Backend**: `backend/Dockerfile` + `render.yaml` deploy it as a Render web
+  service (free tier, no credit card) — connect the repo at
+  https://dashboard.render.com/blueprints and Render builds from the
+  Dockerfile. `backend/checkpoints/model.pt` and
+  `backend/models/hand_landmarker.task` must exist locally before building
+  the image (both are gitignored, so they don't come from the repo). The
+  free plan spins the service down after 15 min idle, with a cold start on
+  the next request.
+- **Frontend**: any static host (Vercel, Netlify, etc.) building
+  `frontend/` with Vite. Set `VITE_WS_URL` to the backend's `wss://` URL —
+  browsers refuse a plain `ws://` connection from an HTTPS page.
+
 ## Tests
 
 ```
