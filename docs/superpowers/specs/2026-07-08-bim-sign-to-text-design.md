@@ -10,14 +10,21 @@ BIM sign → text/speech. The reverse direction (Text/Speech → Sign, e.g. avat
 out of scope and will get its own spec later once Phase 1 is proven.
 
 - **Input:** live webcam, captured in-browser
-- **Recognition scope:** isolated signs (alphabet + digits) — not continuous sentence/grammar recognition
-- **Motion handling:** some BIM signs involve movement (not just static hand shapes), so recognition
-  uses a short sequence of frames, not a single frame
+- **Recognition scope:** isolated signs — the 10 words covered by the MyWSL dataset (air/water,
+  demam/fever, dengar/hear, makan/eat, minum/drink, salah/wrong, saya/I, senyap/silent, tidur/sleep,
+  waktu/time) — not continuous sentence/grammar recognition
+- **Motion handling:** MyWSL's training photos are static hand shapes, so each training sample is a
+  single padded frame; live inference still buffers a short sequence of webcam frames and uses the
+  same motion-then-stillness heuristic, since some BIM signs involve movement the model may
+  encounter beyond this dataset
 - **Output:** recognized text displayed live + spoken aloud via browser TTS
 - **Platform:** web app — React/Tailwind frontend (built from scratch, using 21st.dev component
   generation), Python FastAPI backend
-- **Dataset:** public BIM alphabet/digit dataset. Exact source is decided at implementation time;
-  the data loader is built dataset-agnostic so swapping the source doesn't require pipeline changes.
+- **Dataset:** [MyWSL2023](https://data.mendeley.com/datasets/zvk55p7ktd) — Malaysian Words Sign
+  Language Dataset (Johari et al., 2023), Mendeley Data, CC BY 4.0. 3,500 static hand-gesture
+  photos (300 train / 50 test per class) across the 10 words above, reorganized into the loader's
+  `<root>/<class>/<sample>/*.jpg` layout via `backend/train/prepare_mywsl.py`. The data loader
+  stays dataset-agnostic, so swapping datasets later doesn't require pipeline changes.
 - **Explicitly out of scope for Phase 1:** continuous sentence/grammar recognition, Text→Sign
   direction, public deployment/hosting (this phase targets local dev/demo only)
 
