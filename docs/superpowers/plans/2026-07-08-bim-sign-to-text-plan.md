@@ -1910,7 +1910,9 @@ export default function App() {
 
 - [ ] **Step 2: Train a real checkpoint**
 
-Reorganize a chosen BIM alphabet/digit dataset into `<root>/<class>/<sample>/*.jpg`, then run:
+Download [MyWSL2023](https://data.mendeley.com/datasets/zvk55p7ktd) (CC BY 4.0) and reorganize it
+into `<root>/<class>/<sample>/*.jpg` via `python -m train.prepare_mywsl "/path/to/MyWSL2023 CROP DATA" /path/to/dataset`,
+then run:
 
 Run: `cd backend && python -m train.train /path/to/dataset backend/checkpoints/model.pt --epochs 30`
 Expected: script completes, `backend/checkpoints/model.pt` exists.
