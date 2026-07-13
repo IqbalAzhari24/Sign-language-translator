@@ -3,7 +3,5 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-backend/checkpoints/
-backend/models/*.task
 node_modules/
 frontend/dist/

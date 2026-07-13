@@ -33,6 +33,12 @@ def create_app(checkpoint_path: Path = CHECKPOINT_PATH) -> FastAPI:
     model, class_names = load_model(checkpoint_path)
     app = FastAPI()
 
+    @app.get("/health")
+    async def health():
+        # Plain 2xx route for the host's health check (e.g. Render) to poll —
+        # the app has no other HTTP routes, only the websocket endpoint below.
+        return {"status": "ok"}
+
     @app.websocket("/ws/sign-stream")
     async def sign_stream(websocket: WebSocket):
         await websocket.accept()

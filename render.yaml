@@ -1,0 +1,10 @@
+# Render Blueprint — deploy via https://dashboard.render.com/blueprints
+# "New +" -> "Blueprint" -> connect this repo -> Render reads this file.
+services:
+  - name: sign-language-translator-backend
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
