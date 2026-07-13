@@ -26,8 +26,22 @@ class SignDataset(Dataset):
                 if sample_dir.is_dir():
                     self.samples.append((sample_dir, self.class_to_idx[class_name]))
 
+        # Landmark extraction is deterministic per frame, but training runs
+        # the same samples over many epochs; caching avoids re-running
+        # MediaPipe detection on every image on every epoch.
+        self._landmark_cache = {}
+
     def __len__(self):
         return len(self.samples)
+
+    def _landmarks_for(self, frame_path):
+        cached = self._landmark_cache.get(frame_path)
+        if cached is not None:
+            return cached
+        frame = cv2.imread(str(frame_path))
+        landmarks, _ = extract_landmarks(frame, self.hands_detector)
+        self._landmark_cache[frame_path] = landmarks
+        return landmarks
 
     def __getitem__(self, idx):
         sample_dir, label = self.samples[idx]
@@ -47,9 +61,7 @@ class SignDataset(Dataset):
         )
         offset = self.sequence_length - len(frame_paths)
         for i, frame_path in enumerate(frame_paths):
-            frame = cv2.imread(str(frame_path))
-            landmarks, _ = extract_landmarks(frame, self.hands_detector)
-            sequence[offset + i] = landmarks
+            sequence[offset + i] = self._landmarks_for(frame_path)
 
         flat = sequence.reshape(self.sequence_length, -1)
         return torch.from_numpy(flat), label

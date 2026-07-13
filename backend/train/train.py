@@ -7,6 +7,8 @@ from torch.utils.data import DataLoader, random_split
 from app.model import SignSequenceClassifier
 from train.dataset import SignDataset
 
+SPLIT_SEED = 0
+
 
 def train(
     dataset_root,
@@ -21,7 +23,9 @@ def train(
 
     val_size = max(1, int(0.2 * len(dataset)))
     train_size = len(dataset) - val_size
-    train_set, _val_set = random_split(dataset, [train_size, val_size])
+    train_set, _val_set = random_split(
+        dataset, [train_size, val_size], generator=torch.Generator().manual_seed(SPLIT_SEED)
+    )
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
 
     model = SignSequenceClassifier(num_classes=len(dataset.classes))
@@ -59,12 +63,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     detector = create_hand_landmarker()
-    train(
-        args.dataset_root,
-        detector,
-        args.checkpoint_path,
-        epochs=args.epochs,
-        sequence_length=args.sequence_length,
-        batch_size=args.batch_size,
-    )
-    detector.close()
+    try:
+        train(
+            args.dataset_root,
+            detector,
+            args.checkpoint_path,
+            epochs=args.epochs,
+            sequence_length=args.sequence_length,
+            batch_size=args.batch_size,
+        )
+    finally:
+        detector.close()

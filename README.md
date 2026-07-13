@@ -38,6 +38,14 @@ Needs a trained checkpoint at `backend/checkpoints/model.pt` (see
 `backend/train/train.py`) and the MediaPipe hand landmarker model at
 `backend/models/hand_landmarker.task`.
 
+`mediapipe` needs system OpenGL libraries just to import, even for CPU-only
+inference — without them, `import mediapipe` fails with
+`OSError: libGLESv2.so.2: cannot open shared object file`. On Debian/Ubuntu:
+
+```
+sudo apt-get install -y libgles2 libegl1 libgl1
+```
+
 ### Dataset
 
 Training data is [MyWSL2023](https://data.mendeley.com/datasets/zvk55p7ktd) —
